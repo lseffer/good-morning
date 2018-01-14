@@ -40,7 +40,7 @@ class KeyRatiosDownloader(object):
         """
         self._table_prefix = table_prefix
 
-    def download(self, ticker, conn = None, region = 'GBR', culture = 'en_US', currency = 'USD'):
+    def download(self, ticker, conn = None, region = 'GBR', culture = 'en_US', currency = 'USD', full_year = False):
         u"""Downloads and returns key ratios for the given Morningstar ticker.
 
         Downloads and returns an array of pandas.DataFrames containing the key
@@ -54,7 +54,7 @@ class KeyRatiosDownloader(object):
         :param culture: Sets culture.
         :param currency: Sets currency.
         :return: List of pandas.DataFrames containing the key ratios.
-        """
+        """ 
         url = (r'http://financials.morningstar.com/ajax/exportKR2CSV.html?' +
                r'&callback=?&t={t}&region={reg}&culture={cult}&cur={cur}'.format(
                    t=ticker, reg=region, cult=culture, cur=currency))
@@ -76,7 +76,7 @@ class KeyRatiosDownloader(object):
                 (u'Key Ratios -> Financial Health',
                  u'Key Liquidity/Financial Health'),
                 (u'Key Ratios -> Efficiency Ratios', u'Key Efficiency Ratios')]
-            frames = self._parse_frames(tables, response_structure)
+            frames = self._parse_frames(tables, response_structure, full_year)
 
             ############################
             # Error Handling for Ratios
@@ -132,7 +132,7 @@ class KeyRatiosDownloader(object):
         return tables
 
     @staticmethod
-    def _parse_frames(tables, response_structure):
+    def _parse_frames(tables, response_structure, full_year):
         u"""Returns an array of processed pandas.DataFrames based on the
         original list of tables and the special response_structure list.
 
@@ -149,7 +149,7 @@ class KeyRatiosDownloader(object):
         if len(tables) == 0:
             return ("MorningStar could not find the ticker")
 
-        period_start = tables[0][1].ix[0][1]
+        period_start = tables[0][1].iloc[0][1]
         period_month = pd.datetime.strptime(period_start, u'%Y-%m').month
         #period_freq = pd.datetools.YearEnd(month=period_month)
         period_freq = pd.tseries.offsets.YearEnd(month=period_month)
@@ -157,14 +157,14 @@ class KeyRatiosDownloader(object):
         for index, (check_name, frame_name) in enumerate(response_structure):
             if frame_name and tables[index][0] == check_name:
                 frame = KeyRatiosDownloader._process_frame(
-                    tables[index][1], frame_name, period_start, period_freq)
+                    tables[index][1], frame_name, period_start, period_freq, full_year)
                 if frame is not None and frame.index.size > 0:
                     frames.append(frame)
         return frames
 
     @staticmethod
     def _process_frame(frame, frame_name, period_start,
-                       period_freq):
+                       period_freq, full_year):
         u"""Returns a processed pandas.DataFrame based on the original frame.
 
         :param frame: Original pandas.DataFrame to be processed.
@@ -176,11 +176,14 @@ class KeyRatiosDownloader(object):
         output_frame = frame.set_index(frame[0])
         del output_frame[0]
         output_frame.index.name = frame_name
+        if full_year:
+            if not re.match(r'^\d{4}-\d{2}$', output_frame.iloc[0,-1]):
+                output_frame = output_frame.iloc[:,:-1]
         output_frame.columns = pd.period_range(period_start,
-                                               periods=len(output_frame.ix[0]),
+                                               periods=len(output_frame.iloc[0]),
                                                freq=period_freq)
         output_frame.columns.name = u'Period'
-        if re.match(r'^\d{4}-\d{2}$', output_frame.ix[0][0]):
+        if re.match(r'^\d{4}-\d{2}$', output_frame.iloc[0][0]):
             output_frame.drop(output_frame.index[0], inplace=True)
         output_frame.replace(u',', u'', regex=True, inplace=True)
         output_frame.replace(u'^\s*$', u'NaN', regex=True, inplace=True)
@@ -510,11 +513,11 @@ class FinancialsDownloader(object):
             u'REPLACE INTO `%s`\n' % table_name +
             u'  (%s)\nVALUES\n' % u', '.join(columns) +
             u',\n'.join([u'("' + ticker + u'", %d, %d, "%s", ' %
-                        (index, frame.ix[index, u'parent_index'],
-                         frame.ix[index, u'title']) +
+                        (index, frame.iloc[index, u'parent_index'],
+                         frame.iloc[index, u'title']) +
                         u', '.join(
-                            [u'NULL' if np.isnan(frame.ix[index, period])
-                             else u'%.5f' % frame.ix[index, period]
+                            [u'NULL' if np.isnan(frame.iloc[index, period])
+                             else u'%.5f' % frame.iloc[index, period]
                              for period in frame.columns[2:]]) + u')'
                         for index in frame.index]))
 
